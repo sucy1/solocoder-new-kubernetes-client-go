@@ -515,9 +515,11 @@ func (c *dynamicResourceClient) ApplyStatus(ctx context.Context, name string, ob
 }
 
 func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, data []byte, opts metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) {
-	pt := types.ApplyYAMLPatchType
+	pt := types.PatchType("application/apply-patch+json")
 	if features.FeatureGates().Enabled(features.ClientsAllowCBOR) && features.FeatureGates().Enabled(features.ClientsPreferCBOR) {
 		pt = types.ApplyCBORPatchType
+	} else if features.FeatureGates().Enabled(features.ClientsAllowCBOR) {
+		pt = types.ApplyYAMLPatchType
 	}
 	return c.Patch(ctx, name, pt, data, opts, subresources...)
 }

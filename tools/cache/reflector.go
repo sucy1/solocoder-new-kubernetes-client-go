@@ -215,6 +215,7 @@ type WatchErrorHandlerWithContext func(ctx context.Context, r *Reflector, err er
 
 type WatchConnectionState struct {
 	Connected        bool
+	Ready            bool
 	Error            error
 	ResourceVersion  string
 	Timestamp        time.Time
@@ -518,6 +519,15 @@ func (r *Reflector) ListAndWatchWithContext(ctx context.Context) error {
 		}
 	}
 
+	if r.OnConnect != nil {
+		r.OnConnect(WatchConnectionState{
+			Connected:       true,
+			Ready:           true,
+			ResourceVersion: r.LastSyncResourceVersion(),
+			Timestamp:       r.clock.Now(),
+		})
+	}
+
 	logger.V(2).Info("Caches populated", "type", r.typeDescription, "reflector", r.name)
 	return r.watchWithResync(ctx, w)
 }
@@ -633,6 +643,7 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 		if w != nil && r.OnConnect != nil {
 			r.OnConnect(WatchConnectionState{
 				Connected:       true,
+				Ready:           false,
 				ResourceVersion: r.LastSyncResourceVersion(),
 				Timestamp:       r.clock.Now(),
 			})
@@ -665,6 +676,7 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 		if r.OnDisconnect != nil && err != nil && !errors.Is(err, errorStopRequested) {
 			r.OnDisconnect(WatchConnectionState{
 				Connected:       false,
+				Ready:           false,
 				Error:           err,
 				ResourceVersion: r.LastSyncResourceVersion(),
 				Timestamp:       r.clock.Now(),

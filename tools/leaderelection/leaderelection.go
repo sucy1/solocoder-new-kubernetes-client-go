@@ -215,7 +215,10 @@ func (le *LeaderElector) Run(ctx context.Context) {
 	defer runtime.HandleCrashWithContext(ctx)
 
 	var autoResign bool
+	var onStartedLeadingDone sync.WaitGroup
+	onStartedLeadingDone.Add(1)
 	defer func() {
+		onStartedLeadingDone.Wait()
 		if autoResign {
 			logger := klog.FromContext(ctx)
 			le.release(logger)
@@ -224,11 +227,15 @@ func (le *LeaderElector) Run(ctx context.Context) {
 	defer le.config.Callbacks.OnStoppedLeading()
 
 	if !le.acquire(ctx) {
+		onStartedLeadingDone.Done()
 		return // ctx signalled done
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go le.config.Callbacks.OnStartedLeading(ctx)
+	go func() {
+		defer onStartedLeadingDone.Done()
+		le.config.Callbacks.OnStartedLeading(ctx)
+	}()
 	autoResign = le.renew(ctx)
 }
 

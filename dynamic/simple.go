@@ -333,9 +333,11 @@ func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, dat
 	if err := validateNamespaceWithOptionalName(c.namespace, name); err != nil {
 		return nil, err
 	}
-	pt := types.ApplyYAMLPatchType
+	pt := types.PatchType("application/apply-patch+json")
 	if features.FeatureGates().Enabled(features.ClientsAllowCBOR) && features.FeatureGates().Enabled(features.ClientsPreferCBOR) {
 		pt = types.ApplyCBORPatchType
+	} else if features.FeatureGates().Enabled(features.ClientsAllowCBOR) {
+		pt = types.ApplyYAMLPatchType
 	}
 	var out unstructured.Unstructured
 	if err := c.client.client.
