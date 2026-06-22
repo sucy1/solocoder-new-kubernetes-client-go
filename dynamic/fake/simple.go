@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/features"
 	"k8s.io/client-go/testing"
 )
 
@@ -514,7 +515,11 @@ func (c *dynamicResourceClient) ApplyStatus(ctx context.Context, name string, ob
 }
 
 func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, data []byte, opts metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) {
-	return c.Patch(ctx, name, types.ApplyPatchType, data, opts, subresources...)
+	pt := types.ApplyYAMLPatchType
+	if features.FeatureGates().Enabled(features.ClientsAllowCBOR) && features.FeatureGates().Enabled(features.ClientsPreferCBOR) {
+		pt = types.ApplyCBORPatchType
+	}
+	return c.Patch(ctx, name, pt, data, opts, subresources...)
 }
 
 func (c *dynamicResourceClient) PatchApplyStatus(ctx context.Context, name string, data []byte, opts metav1.ApplyOptions) (*unstructured.Unstructured, error) {

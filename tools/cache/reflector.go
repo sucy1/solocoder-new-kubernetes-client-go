@@ -629,13 +629,13 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 				}
 				return err
 			}
-			if r.OnConnect != nil {
-				r.OnConnect(WatchConnectionState{
-					Connected:       true,
-					ResourceVersion: r.LastSyncResourceVersion(),
-					Timestamp:       r.clock.Now(),
-				})
-			}
+		}
+		if w != nil && r.OnConnect != nil {
+			r.OnConnect(WatchConnectionState{
+				Connected:       true,
+				ResourceVersion: r.LastSyncResourceVersion(),
+				Timestamp:       r.clock.Now(),
+			})
 		}
 
 		err = handleWatch(ctx, start, w, r.store, r.expectedType, r.expectedGVK, r.name, r.typeDescription,
@@ -662,7 +662,7 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 		// Just set it to nil to trigger a retry on the next loop.
 		w = nil
 		retry.After(err)
-		if r.OnDisconnect != nil && !errors.Is(err, errorStopRequested) {
+		if r.OnDisconnect != nil && err != nil && !errors.Is(err, errorStopRequested) {
 			r.OnDisconnect(WatchConnectionState{
 				Connected:       false,
 				Error:           err,

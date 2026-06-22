@@ -333,9 +333,13 @@ func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, dat
 	if err := validateNamespaceWithOptionalName(c.namespace, name); err != nil {
 		return nil, err
 	}
+	pt := types.ApplyYAMLPatchType
+	if features.FeatureGates().Enabled(features.ClientsAllowCBOR) && features.FeatureGates().Enabled(features.ClientsPreferCBOR) {
+		pt = types.ApplyCBORPatchType
+	}
 	var out unstructured.Unstructured
 	if err := c.client.client.
-		Patch(types.ApplyPatchType).
+		Patch(pt).
 		AbsPath(append(c.makeURLSegments(name), subresources...)...).
 		Body(data).
 		SpecificallyVersionedParams(&opts, dynamicParameterCodec, versionV1).

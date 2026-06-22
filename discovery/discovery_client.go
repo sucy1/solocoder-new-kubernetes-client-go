@@ -174,7 +174,7 @@ type DiscoveryClient struct {
 	NoPeerDiscovery bool
 
 	cacheTTL                time.Duration
-	cacheLock               sync.RWMutex
+	cacheLock               *sync.RWMutex
 	serverGroupsCache       *discoveryCacheEntry
 	serverResourcesCache    map[string]*discoveryCacheEntry
 }
@@ -835,7 +835,7 @@ func NewDiscoveryClientForConfigAndClient(c *restclient.Config, httpClient *http
 		return nil, err
 	}
 	client, err := restclient.UnversionedRESTClientForConfigAndClient(&config, httpClient)
-	return &DiscoveryClient{restClient: client, LegacyPrefix: "/api", UseLegacyDiscovery: false, serverResourcesCache: map[string]*discoveryCacheEntry{}}, err
+	return &DiscoveryClient{restClient: client, LegacyPrefix: "/api", UseLegacyDiscovery: false, cacheLock: &sync.RWMutex{}, serverResourcesCache: map[string]*discoveryCacheEntry{}}, err
 }
 
 // NewDiscoveryClientForConfigOrDie creates a new DiscoveryClient for the given config. If
@@ -851,7 +851,7 @@ func NewDiscoveryClientForConfigOrDie(c *restclient.Config) *DiscoveryClient {
 
 // NewDiscoveryClient returns a new DiscoveryClient for the given RESTClient.
 func NewDiscoveryClient(c restclient.Interface) *DiscoveryClient {
-	return &DiscoveryClient{restClient: c, LegacyPrefix: "/api", UseLegacyDiscovery: false, serverResourcesCache: map[string]*discoveryCacheEntry{}}
+	return &DiscoveryClient{restClient: c, LegacyPrefix: "/api", UseLegacyDiscovery: false, cacheLock: &sync.RWMutex{}, serverResourcesCache: map[string]*discoveryCacheEntry{}}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

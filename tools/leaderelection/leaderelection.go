@@ -213,6 +213,14 @@ type LeaderElector struct {
 // stopped holding the leader lease
 func (le *LeaderElector) Run(ctx context.Context) {
 	defer runtime.HandleCrashWithContext(ctx)
+
+	var autoResign bool
+	defer func() {
+		if autoResign {
+			logger := klog.FromContext(ctx)
+			le.release(logger)
+		}
+	}()
 	defer le.config.Callbacks.OnStoppedLeading()
 
 	if !le.acquire(ctx) {
@@ -221,7 +229,7 @@ func (le *LeaderElector) Run(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go le.config.Callbacks.OnStartedLeading(ctx)
-	le.renew(ctx)
+	autoResign = le.renew(ctx)
 }
 
 // RunOrDie starts a client with the provided config or panics if the config
@@ -279,12 +287,13 @@ func (le *LeaderElector) acquire(ctx context.Context) bool {
 }
 
 // renew loops calling tryAcquireOrRenew and returns immediately when tryAcquireOrRenew fails or ctx signals done.
-func (le *LeaderElector) renew(ctx context.Context) {
+func (le *LeaderElector) renew(ctx context.Context) bool {
 	defer le.config.Lock.RecordEvent("stopped leading")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	logger := klog.FromContext(ctx)
 	le.lastRenewSucceededTime = le.clock.Now()
+	autoResign := false
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
 		err := wait.PollUntilContextTimeout(ctx, le.config.RetryPeriod, le.config.RenewDeadline, true, func(ctx context.Context) (done bool, err error) {
 			if err := ctx.Err(); err != nil {
@@ -307,16 +316,20 @@ func (le *LeaderElector) renew(ctx context.Context) {
 		logger.Info("Failed to renew lease", "lock", desc, "err", err)
 		if le.config.AutoResignOnLeaseExpiry && le.clock.Since(le.lastRenewSucceededTime) > le.config.LeaseDuration {
 			logger.Info("Lease renewal has exceeded LeaseDuration, auto-resigning", "lock", desc)
-			le.release(logger)
+			autoResign = true
 		}
 		cancel()
 	}, le.config.RetryPeriod)
-	if le.config.AutoResignOnLeaseExpiry && le.clock.Since(le.lastRenewSucceededTime) > le.config.LeaseDuration {
-		le.release(logger)
+	if !autoResign && le.config.AutoResignOnLeaseExpiry && le.clock.Since(le.lastRenewSucceededTime) > le.config.LeaseDuration {
+		autoResign = true
+	}
+	if autoResign {
+		return true
 	}
 	if le.config.ReleaseOnCancel {
 		le.release(logger)
 	}
+	return false
 }
 
 // release attempts to release the leader lease if we have acquired it.
