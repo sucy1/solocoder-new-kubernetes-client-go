@@ -59,7 +59,7 @@ func HTTPWrappersForConfig(config *Config, rt http.RoundTripper) (http.RoundTrip
 		rt = NewBasicAuthRoundTripper(config.Username, config.Password, rt)
 	}
 	if len(config.UserAgent) > 0 {
-		rt = NewUserAgentRoundTripper(config.UserAgent, rt)
+		rt = newUserAgentRoundTripperWithPrefix(config.UserAgent, config.UserAgentPrefix, rt)
 	}
 	if len(config.Impersonate.UserName) > 0 ||
 		len(config.Impersonate.UID) > 0 ||
@@ -154,15 +154,20 @@ func (rt *authProxyRoundTripper) CancelRequest(req *http.Request) {
 func (rt *authProxyRoundTripper) WrappedRoundTripper() http.RoundTripper { return rt.rt }
 
 type userAgentRoundTripper struct {
-	agent string
-	rt    http.RoundTripper
+	agent  string
+	prefix string
+	rt     http.RoundTripper
 }
 
 var _ utilnet.RoundTripperWrapper = &userAgentRoundTripper{}
 
 // NewUserAgentRoundTripper will add User-Agent header to a request unless it has already been set.
 func NewUserAgentRoundTripper(agent string, rt http.RoundTripper) http.RoundTripper {
-	return &userAgentRoundTripper{agent, rt}
+	return &userAgentRoundTripper{agent, "", rt}
+}
+
+func newUserAgentRoundTripperWithPrefix(agent, prefix string, rt http.RoundTripper) http.RoundTripper {
+	return &userAgentRoundTripper{agent, prefix, rt}
 }
 
 func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -170,7 +175,11 @@ func (rt *userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		return rt.rt.RoundTrip(req)
 	}
 	req = utilnet.CloneRequest(req)
-	req.Header.Set("User-Agent", rt.agent)
+	agent := rt.agent
+	if len(rt.prefix) > 0 {
+		agent = rt.prefix + agent
+	}
+	req.Header.Set("User-Agent", agent)
 	return rt.rt.RoundTrip(req)
 }
 
@@ -179,6 +188,23 @@ func (rt *userAgentRoundTripper) CancelRequest(req *http.Request) {
 }
 
 func (rt *userAgentRoundTripper) WrappedRoundTripper() http.RoundTripper { return rt.rt }
+
+// SetUserAgentPrefix walks the RoundTripper chain to find the userAgentRoundTripper
+// and sets the prefix on it. Returns true if the userAgentRoundTripper was found.
+func SetUserAgentPrefix(rt http.RoundTripper, prefix string) bool {
+	for rt != nil {
+		switch v := rt.(type) {
+		case *userAgentRoundTripper:
+			v.prefix = prefix
+			return true
+		case utilnet.RoundTripperWrapper:
+			rt = v.WrappedRoundTripper()
+		default:
+			return false
+		}
+	}
+	return false
+}
 
 type basicAuthRoundTripper struct {
 	username string

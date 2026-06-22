@@ -84,6 +84,7 @@ func HTTPWrappersForConfig(config *Config, rt http.RoundTripper) (http.RoundTrip
 func (c *Config) TransportConfig() (*transport.Config, error) {
 	conf := &transport.Config{
 		UserAgent:          c.UserAgent,
+		UserAgentPrefix:    c.UserAgentPrefix,
 		Transport:          c.Transport,
 		WrapTransport:      c.WrapTransport,
 		DisableCompression: c.DisableCompression,

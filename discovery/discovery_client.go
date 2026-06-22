@@ -160,17 +160,23 @@ type OpenAPIV3SchemaInterface interface {
 
 // DiscoveryClient implements the functions that discover server-supported API groups,
 // versions and resources.
+type discoveryCacheEntry struct {
+	data     interface{}
+	err      error
+	cachedAt time.Time
+}
+
 type DiscoveryClient struct {
 	restClient restclient.Interface
 
 	LegacyPrefix string
-	// Forces the client to request only "unaggregated" (legacy) discovery.
 	UseLegacyDiscovery bool
-	// NoPeerDiscovery will request the "nopeer" profile of aggregated discovery.
-	// This allows a client to get just the discovery documents served by the single apiserver
-	// that it is talking to. This is useful for clients that need to understand the state
-	// of a single apiserver, for example, to validate that the apiserver is ready to serve traffic.
 	NoPeerDiscovery bool
+
+	cacheTTL                time.Duration
+	cacheLock               sync.RWMutex
+	serverGroupsCache       *discoveryCacheEntry
+	serverResourcesCache    map[string]*discoveryCacheEntry
 }
 
 var _ AggregatedDiscoveryInterface = &DiscoveryClient{}
@@ -372,15 +378,43 @@ func ContentTypeIsGVK(contentType string, gvk schema.GroupVersionKind) (bool, er
 // ServerGroups returns the supported groups, with information like supported versions and the
 // preferred version.
 func (d *DiscoveryClient) ServerGroups() (*metav1.APIGroupList, error) {
+	if d.cacheTTL > 0 {
+		d.cacheLock.RLock()
+		if d.serverGroupsCache != nil && time.Since(d.serverGroupsCache.cachedAt) < d.cacheTTL {
+			entry := d.serverGroupsCache
+			d.cacheLock.RUnlock()
+			return entry.data.(*metav1.APIGroupList), entry.err
+		}
+		d.cacheLock.RUnlock()
+	}
 	groups, _, _, err := d.GroupsAndMaybeResources()
 	if err != nil {
 		return nil, err
+	}
+	if d.cacheTTL > 0 {
+		d.cacheLock.Lock()
+		d.serverGroupsCache = &discoveryCacheEntry{
+			data:     groups,
+			err:      nil,
+			cachedAt: time.Now(),
+		}
+		d.cacheLock.Unlock()
 	}
 	return groups, nil
 }
 
 // ServerResourcesForGroupVersion returns the supported resources for a group and version.
 func (d *DiscoveryClient) ServerResourcesForGroupVersion(groupVersion string) (resources *metav1.APIResourceList, err error) {
+	if d.cacheTTL > 0 {
+		d.cacheLock.RLock()
+		if d.serverResourcesCache != nil {
+			if entry, ok := d.serverResourcesCache[groupVersion]; ok && time.Since(entry.cachedAt) < d.cacheTTL {
+				d.cacheLock.RUnlock()
+				return entry.data.(*metav1.APIResourceList), entry.err
+			}
+		}
+		d.cacheLock.RUnlock()
+	}
 	url := url.URL{}
 	if len(groupVersion) == 0 {
 		return nil, fmt.Errorf("groupVersion shouldn't be empty")
@@ -395,13 +429,46 @@ func (d *DiscoveryClient) ServerResourcesForGroupVersion(groupVersion string) (r
 	}
 	err = d.restClient.Get().AbsPath(url.String()).Do(context.TODO()).Into(resources)
 	if err != nil {
-		// Tolerate core/v1 not found response by returning empty resource list;
-		// this probably should not happen. But we should verify all callers are
-		// not depending on this toleration before removal.
 		if groupVersion == "v1" && errors.IsNotFound(err) {
+			if d.cacheTTL > 0 {
+				d.cacheLock.Lock()
+				if d.serverResourcesCache == nil {
+					d.serverResourcesCache = map[string]*discoveryCacheEntry{}
+				}
+				d.serverResourcesCache[groupVersion] = &discoveryCacheEntry{
+					data:     resources,
+					err:      nil,
+					cachedAt: time.Now(),
+				}
+				d.cacheLock.Unlock()
+			}
 			return resources, nil
 		}
+		if d.cacheTTL > 0 {
+			d.cacheLock.Lock()
+			if d.serverResourcesCache == nil {
+				d.serverResourcesCache = map[string]*discoveryCacheEntry{}
+			}
+			d.serverResourcesCache[groupVersion] = &discoveryCacheEntry{
+				data:     nil,
+				err:      err,
+				cachedAt: time.Now(),
+			}
+			d.cacheLock.Unlock()
+		}
 		return nil, err
+	}
+	if d.cacheTTL > 0 {
+		d.cacheLock.Lock()
+		if d.serverResourcesCache == nil {
+			d.serverResourcesCache = map[string]*discoveryCacheEntry{}
+		}
+		d.serverResourcesCache[groupVersion] = &discoveryCacheEntry{
+			data:     resources,
+			err:      nil,
+			cachedAt: time.Now(),
+		}
+		d.cacheLock.Unlock()
 	}
 	return resources, nil
 }
@@ -685,6 +752,25 @@ func (d *DiscoveryClient) WithLegacy() DiscoveryInterface {
 	return &client
 }
 
+func (d *DiscoveryClient) InvalidateCache() {
+	d.cacheLock.Lock()
+	defer d.cacheLock.Unlock()
+	d.serverGroupsCache = nil
+	d.serverResourcesCache = nil
+}
+
+func (d *DiscoveryClient) SetCacheTTL(ttl time.Duration) {
+	d.cacheLock.Lock()
+	defer d.cacheLock.Unlock()
+	d.cacheTTL = ttl
+}
+
+func (d *DiscoveryClient) CacheTTL() time.Duration {
+	d.cacheLock.RLock()
+	defer d.cacheLock.RUnlock()
+	return d.cacheTTL
+}
+
 // withRetries retries the given recovery function in case the groups supported by the server change after ServerGroup() returns.
 func withRetries(maxRetries int, f func() ([]*metav1.APIGroup, []*metav1.APIResourceList, error)) ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
 	var result []*metav1.APIResourceList
@@ -749,7 +835,7 @@ func NewDiscoveryClientForConfigAndClient(c *restclient.Config, httpClient *http
 		return nil, err
 	}
 	client, err := restclient.UnversionedRESTClientForConfigAndClient(&config, httpClient)
-	return &DiscoveryClient{restClient: client, LegacyPrefix: "/api", UseLegacyDiscovery: false}, err
+	return &DiscoveryClient{restClient: client, LegacyPrefix: "/api", UseLegacyDiscovery: false, serverResourcesCache: map[string]*discoveryCacheEntry{}}, err
 }
 
 // NewDiscoveryClientForConfigOrDie creates a new DiscoveryClient for the given config. If
@@ -765,7 +851,7 @@ func NewDiscoveryClientForConfigOrDie(c *restclient.Config) *DiscoveryClient {
 
 // NewDiscoveryClient returns a new DiscoveryClient for the given RESTClient.
 func NewDiscoveryClient(c restclient.Interface) *DiscoveryClient {
-	return &DiscoveryClient{restClient: c, LegacyPrefix: "/api", UseLegacyDiscovery: false}
+	return &DiscoveryClient{restClient: c, LegacyPrefix: "/api", UseLegacyDiscovery: false, serverResourcesCache: map[string]*discoveryCacheEntry{}}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

@@ -65,6 +65,8 @@ type sharedInformerFactory struct {
 	customResync     map[reflect.Type]time.Duration
 	transform        cache.TransformFunc
 	informerName     *cache.InformerName
+	onConnect        func(cache.WatchConnectionState)
+	onDisconnect     func(cache.WatchConnectionState)
 
 	informers map[reflect.Type]cache.SharedIndexInformer
 	// startedInformers is used for tracking which informers have been started.
@@ -118,6 +120,14 @@ func WithTransform(transform cache.TransformFunc) SharedInformerOption {
 func WithInformerName(informerName *cache.InformerName) SharedInformerOption {
 	return func(factory *sharedInformerFactory) *sharedInformerFactory {
 		factory.informerName = informerName
+		return factory
+	}
+}
+
+func WithWatchConnectionCallbacks(onConnect, onDisconnect func(cache.WatchConnectionState)) SharedInformerOption {
+	return func(factory *sharedInformerFactory) *sharedInformerFactory {
+		factory.onConnect = onConnect
+		factory.onDisconnect = onDisconnect
 		return factory
 	}
 }
@@ -258,6 +268,9 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 	informer = newFunc(f.client, resyncPeriod)
 	if f.transform != nil {
 		informer.SetTransform(f.transform)
+	}
+	if f.onConnect != nil || f.onDisconnect != nil {
+		informer.SetWatchConnectionCallbacks(f.onConnect, f.onDisconnect)
 	}
 	f.informers[informerType] = informer
 

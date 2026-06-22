@@ -326,6 +326,30 @@ func (c *dynamicResourceClient) ApplyStatus(ctx context.Context, name string, ob
 	return c.Apply(ctx, name, obj, opts, "status")
 }
 
+func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, data []byte, opts metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if len(name) == 0 {
+		return nil, fmt.Errorf("name is required")
+	}
+	if err := validateNamespaceWithOptionalName(c.namespace, name); err != nil {
+		return nil, err
+	}
+	var out unstructured.Unstructured
+	if err := c.client.client.
+		Patch(types.ApplyPatchType).
+		AbsPath(append(c.makeURLSegments(name), subresources...)...).
+		Body(data).
+		SpecificallyVersionedParams(&opts, dynamicParameterCodec, versionV1).
+		Do(ctx).Into(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *dynamicResourceClient) PatchApplyStatus(ctx context.Context, name string, data []byte, opts metav1.ApplyOptions) (*unstructured.Unstructured, error) {
+	patchOpts := opts.ToPatchOptions()
+	return c.PatchApply(ctx, name, data, patchOpts, "status")
+}
+
 func validateNamespaceWithOptionalName(namespace string, name ...string) error {
 	if msgs := rest.IsValidPathSegmentName(namespace); len(msgs) != 0 {
 		return fmt.Errorf("invalid namespace %q: %v", namespace, msgs)

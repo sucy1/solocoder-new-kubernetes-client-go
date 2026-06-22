@@ -77,6 +77,7 @@ import (
 	storagev1beta1 "k8s.io/client-go/kubernetes/typed/storage/v1beta1"
 	storagemigrationv1beta1 "k8s.io/client-go/kubernetes/typed/storagemigration/v1beta1"
 	rest "k8s.io/client-go/rest"
+	transport "k8s.io/client-go/transport"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
 )
 
@@ -140,6 +141,7 @@ type Interface interface {
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
+	userAgentPrefix                string
 	admissionregistrationV1       *admissionregistrationv1.AdmissionregistrationV1Client
 	admissionregistrationV1alpha1 *admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Client
 	admissionregistrationV1beta1  *admissionregistrationv1beta1.AdmissionregistrationV1beta1Client
@@ -468,6 +470,21 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 	return c.DiscoveryClient
 }
 
+func (c *Clientset) SetUserAgentPrefix(prefix string) {
+	c.userAgentPrefix = prefix
+	if c.DiscoveryClient != nil {
+		if rc := c.DiscoveryClient.RESTClient(); rc != nil {
+			if restClient, ok := rc.(*rest.RESTClient); ok && restClient.Client != nil {
+				transport.SetUserAgentPrefix(restClient.Client.Transport, prefix)
+			}
+		}
+	}
+}
+
+func (c *Clientset) UserAgentPrefix() string {
+	return c.userAgentPrefix
+}
+
 // NewForConfig creates a new Clientset for the given config.
 // If config's RateLimiter is not set and QPS and Burst are acceptable,
 // NewForConfig will generate a rate-limiter in configShallowCopy.
@@ -721,6 +738,7 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
+	cs.userAgentPrefix = configShallowCopy.UserAgentPrefix
 	return &cs, nil
 }
 

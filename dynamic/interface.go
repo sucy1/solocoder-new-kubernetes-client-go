@@ -42,6 +42,8 @@ type ResourceInterface interface {
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, options metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error)
 	Apply(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions, subresources ...string) (*unstructured.Unstructured, error)
 	ApplyStatus(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions) (*unstructured.Unstructured, error)
+	PatchApply(ctx context.Context, name string, data []byte, options metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error)
+	PatchApplyStatus(ctx context.Context, name string, data []byte, options metav1.ApplyOptions) (*unstructured.Unstructured, error)
 }
 
 type NamespaceableResourceInterface interface {

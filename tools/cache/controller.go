@@ -97,6 +97,9 @@ type Config struct {
 
 	// WatchListPageSize is the requested chunk size of initial and relist watch lists.
 	WatchListPageSize int64
+
+	OnConnect    func(WatchConnectionState)
+	OnDisconnect func(WatchConnectionState)
 }
 
 // ShouldResyncFunc is a type of function that indicates if a reflector should perform a
@@ -184,6 +187,8 @@ func (c *controller) RunWithContext(ctx context.Context) {
 			MinWatchTimeout: c.config.MinWatchTimeout,
 			TypeDescription: c.config.ObjectDescription,
 			Clock:           c.clock,
+			OnConnect:       c.config.OnConnect,
+			OnDisconnect:    c.config.OnDisconnect,
 		},
 	)
 	r.ShouldResync = c.config.ShouldResync

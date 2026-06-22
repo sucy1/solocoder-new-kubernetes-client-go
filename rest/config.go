@@ -97,6 +97,11 @@ type Config struct {
 	// UserAgent is an optional field that specifies the caller of this request.
 	UserAgent string
 
+	// UserAgentPrefix is an optional field that specifies a prefix to prepend to the
+	// User-Agent header value. If both UserAgentPrefix and UserAgent are set, the
+	// final User-Agent value will be UserAgentPrefix + UserAgent.
+	UserAgentPrefix string
+
 	// DisableCompression bypasses automatic GZip compression requests to the
 	// server.
 	DisableCompression bool
@@ -647,6 +652,7 @@ func AnonymousClientConfig(config *Config) *Config {
 		WarningHandler:            config.WarningHandler,
 		WarningHandlerWithContext: config.WarningHandlerWithContext,
 		UserAgent:                 config.UserAgent,
+		UserAgentPrefix:           config.UserAgentPrefix,
 		DisableCompression:        config.DisableCompression,
 		QPS:                       config.QPS,
 		Burst:                     config.Burst,
@@ -687,6 +693,7 @@ func CopyConfig(config *Config) *Config {
 			NextProtos: config.TLSClientConfig.NextProtos,
 		},
 		UserAgent:                 config.UserAgent,
+		UserAgentPrefix:           config.UserAgentPrefix,
 		DisableCompression:        config.DisableCompression,
 		Transport:                 config.Transport,
 		WrapTransport:             config.WrapTransport,

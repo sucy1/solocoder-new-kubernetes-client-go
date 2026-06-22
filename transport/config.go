@@ -30,6 +30,10 @@ type Config struct {
 	// request.
 	UserAgent string
 
+	// UserAgentPrefix is an optional field that specifies a prefix to prepend
+	// to the User-Agent header value.
+	UserAgentPrefix string
+
 	// The base TLS configuration for this transport.
 	TLS TLSConfig
 

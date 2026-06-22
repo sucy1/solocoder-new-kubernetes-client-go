@@ -168,6 +168,8 @@ type Reflector struct {
 	//
 	// See https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/3157-watch-list#design-details
 	useWatchList bool
+	OnConnect    func(WatchConnectionState)
+	OnDisconnect func(WatchConnectionState)
 }
 
 func (r *Reflector) Name() string {
@@ -210,6 +212,13 @@ type WatchErrorHandler func(r *Reflector, err error)
 // ways. Implementations should return quickly - any expensive processing
 // should be offloaded.
 type WatchErrorHandlerWithContext func(ctx context.Context, r *Reflector, err error)
+
+type WatchConnectionState struct {
+	Connected        bool
+	Error            error
+	ResourceVersion  string
+	Timestamp        time.Time
+}
 
 // DefaultWatchErrorHandler is the default implementation of WatchErrorHandlerWithContext.
 func DefaultWatchErrorHandler(ctx context.Context, r *Reflector, err error) {
@@ -281,6 +290,9 @@ type ReflectorOptions struct {
 	// DelayWithReset(clock, resetDuration) will be called on it to create the delay function.
 	// TODO(#136943): Expose this configuration through SharedInformerFactory.
 	Backoff *wait.Backoff
+
+	OnConnect    func(WatchConnectionState)
+	OnDisconnect func(WatchConnectionState)
 }
 
 // NewReflectorWithOptions creates a new Reflector object which will keep the
@@ -337,6 +349,8 @@ func NewReflectorWithOptions(lw ListerWatcher, expectedType interface{}, store R
 		clock:             reflectorClock,
 		watchErrorHandler: WatchErrorHandlerWithContext(DefaultWatchErrorHandler),
 		expectedType:      reflect.TypeOf(expectedType),
+		OnConnect:         options.OnConnect,
+		OnDisconnect:      options.OnDisconnect,
 	}
 
 	if r.name == "" {
@@ -615,6 +629,13 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 				}
 				return err
 			}
+			if r.OnConnect != nil {
+				r.OnConnect(WatchConnectionState{
+					Connected:       true,
+					ResourceVersion: r.LastSyncResourceVersion(),
+					Timestamp:       r.clock.Now(),
+				})
+			}
 		}
 
 		err = handleWatch(ctx, start, w, r.store, r.expectedType, r.expectedGVK, r.name, r.typeDescription,
@@ -641,6 +662,14 @@ func (r *Reflector) watch(ctx context.Context, w watch.Interface, resyncerrc cha
 		// Just set it to nil to trigger a retry on the next loop.
 		w = nil
 		retry.After(err)
+		if r.OnDisconnect != nil && !errors.Is(err, errorStopRequested) {
+			r.OnDisconnect(WatchConnectionState{
+				Connected:       false,
+				Error:           err,
+				ResourceVersion: r.LastSyncResourceVersion(),
+				Timestamp:       r.clock.Now(),
+			})
+		}
 		if err != nil {
 			if !errors.Is(err, errorStopRequested) {
 				switch {

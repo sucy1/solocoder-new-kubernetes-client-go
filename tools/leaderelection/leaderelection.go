@@ -157,6 +157,8 @@ type LeaderElectionConfig struct {
 	// simultaneously acting on the critical path.
 	ReleaseOnCancel bool
 
+	AutoResignOnLeaseExpiry bool
+
 	// Name is the name of the resource lock for debugging
 	Name string
 
@@ -191,6 +193,7 @@ type LeaderElector struct {
 	observedRecord    rl.LeaderElectionRecord
 	observedRawRecord []byte
 	observedTime      time.Time
+	lastRenewSucceededTime time.Time
 	// used to implement OnNewLeader(), may lag slightly from the
 	// value observedRecord.HolderIdentity if the transition has
 	// not yet been reported.
@@ -281,10 +284,9 @@ func (le *LeaderElector) renew(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	logger := klog.FromContext(ctx)
+	le.lastRenewSucceededTime = le.clock.Now()
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
 		err := wait.PollUntilContextTimeout(ctx, le.config.RetryPeriod, le.config.RenewDeadline, true, func(ctx context.Context) (done bool, err error) {
-			// PollUntilContextTimeout invokes condition even when the context is canceled when immediate=true.
-			// Short-circuit this to prevent unnecessary processing and error log messages.
 			if err := ctx.Err(); err != nil {
 				return false, err
 			}
@@ -297,15 +299,21 @@ func (le *LeaderElector) renew(ctx context.Context) {
 		le.maybeReportTransition()
 		desc := le.config.Lock.Describe()
 		if err == nil {
+			le.lastRenewSucceededTime = le.clock.Now()
 			logger.V(5).Info("Successfully renewed lease", "lock", desc)
 			return
 		}
 		le.metrics.leaderOff(le.config.Name)
 		logger.Info("Failed to renew lease", "lock", desc, "err", err)
+		if le.config.AutoResignOnLeaseExpiry && le.clock.Since(le.lastRenewSucceededTime) > le.config.LeaseDuration {
+			logger.Info("Lease renewal has exceeded LeaseDuration, auto-resigning", "lock", desc)
+			le.release(logger)
+		}
 		cancel()
 	}, le.config.RetryPeriod)
-
-	// if we hold the lease, give it up
+	if le.config.AutoResignOnLeaseExpiry && le.clock.Since(le.lastRenewSucceededTime) > le.config.LeaseDuration {
+		le.release(logger)
+	}
 	if le.config.ReleaseOnCancel {
 		le.release(logger)
 	}

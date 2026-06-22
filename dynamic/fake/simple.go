@@ -513,6 +513,15 @@ func (c *dynamicResourceClient) ApplyStatus(ctx context.Context, name string, ob
 	return c.Apply(ctx, name, obj, options, "status")
 }
 
+func (c *dynamicResourceClient) PatchApply(ctx context.Context, name string, data []byte, opts metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return c.Patch(ctx, name, types.ApplyPatchType, data, opts, subresources...)
+}
+
+func (c *dynamicResourceClient) PatchApplyStatus(ctx context.Context, name string, data []byte, opts metav1.ApplyOptions) (*unstructured.Unstructured, error) {
+	patchOpts := opts.ToPatchOptions()
+	return c.PatchApply(ctx, name, data, patchOpts, "status")
+}
+
 func convertObjectsToUnstructured(s *runtime.Scheme, objs []runtime.Object) ([]runtime.Object, error) {
 	ul := make([]runtime.Object, 0, len(objs))
 

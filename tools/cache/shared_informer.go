@@ -294,6 +294,7 @@ type SharedIndexInformer interface {
 	SharedInformer
 	AddIndexers(indexers Indexers) error
 	GetIndexer() Indexer
+	SetWatchConnectionCallbacks(onConnect, onDisconnect func(WatchConnectionState)) error
 }
 
 // NewSharedInformer creates a new instance for the ListerWatcher. See NewSharedIndexInformerWithOptions for full details.
@@ -644,6 +645,9 @@ type sharedIndexInformer struct {
 
 	// keyFunc is called when processing deltas by the underlying process function.
 	keyFunc KeyFunc
+
+	onConnect    func(WatchConnectionState)
+	onDisconnect func(WatchConnectionState)
 }
 
 // dummyController hides the fact that a SharedInformer is different from a dedicated one
@@ -721,6 +725,19 @@ func (s *sharedIndexInformer) SetTransform(handler TransformFunc) error {
 	return nil
 }
 
+func (s *sharedIndexInformer) SetWatchConnectionCallbacks(onConnect, onDisconnect func(WatchConnectionState)) error {
+	s.startedLock.Lock()
+	defer s.startedLock.Unlock()
+
+	if s.started {
+		return fmt.Errorf("informer has already started")
+	}
+
+	s.onConnect = onConnect
+	s.onDisconnect = onDisconnect
+	return nil
+}
+
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	s.RunWithContext(wait.ContextForChannel(stopCh))
 }
@@ -755,6 +772,8 @@ func (s *sharedIndexInformer) RunWithContext(ctx context.Context) {
 				return s.handleBatchDeltas(logger, deltas, isInInitialList)
 			},
 			WatchErrorHandlerWithContext: s.watchErrorHandler,
+			OnConnect:                    s.onConnect,
+			OnDisconnect:                 s.onDisconnect,
 		}
 
 		s.controller = New(cfg)
